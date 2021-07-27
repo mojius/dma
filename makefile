@@ -9,5 +9,6 @@
 ./build/joypad.o: joypad.asm
 	../rgbasm joypad.asm -o ./build/joypad.o
 
+
 clean:
 	rm ./build/*.o

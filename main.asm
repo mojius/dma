@@ -1,5 +1,8 @@
 INCLUDE "include/hardware.inc"
-INCLUDE "include/structs.asm"
+INCLUDE "include/mystructs.inc"
+
+DEF DAS_INITIAL_TIMER EQU 20
+DEF DAS_INTERVAL EQU 20
 
 SECTION "Header", ROM0[$100]
 
@@ -24,81 +27,81 @@ Start:
     ld [rIE], a
     ; No need to manually request the interrupt now.
 
+    call WaitVBlank
     ld a, LCDCF_OFF
     ld [rLCDC], a
 
-
-    ld hl, $9800
-    ld b, $9C
+    ld hl, _SCRN0 
+    ld b, HIGH(_SCRN1 - _SCRN0)
+    ld c, LOW(_SCRN1 - _SCRN0)
+    xor a
     call WipeMaps
 
-    ld hl, $8000
-    ld b, $88
+    ld hl, _VRAM
+    ld b, HIGH(_VRAM8800 - _VRAM)
+    ld c, LOW(_VRAM8800 - _VRAM)
+    xor a
     call WipeMaps
 
-    ld hl, $8000
+    ld hl, _VRAM
     ld de, GF  
     ld bc, GFEnd - GF
 
     call FCopyToVRAM
 
-    ; Copy our starting OAM vars to C100
-
+    ; Wipe the OAM and overwrite it with zeroes
     call WipeOAM
 
-
-    ; Now we define gerald's properties
-    ld a, $50
-    ld [gerald_sprite], a
-    ld a, $50
-    ld [gerald_sprite + 1], a
-    ld a, $00
-    ld [gerald_sprite + 2], a
-
-    ld a, $50
-    ld [geraldina_sprite], a
-    ld a, $50
-    ld [geraldina_sprite + 1], a
-    ld a, $01
-    ld [geraldina_sprite + 2], a
-    ld a, $00
-    ld [geraldina_sprite + 3], a
-
-
-
-    ld a, HIGH(gerald_sprite)
+    ld a, HIGH(OAMVars)
     call hOAMDMA
 
-    ;Set BG palette
+    ; Set BG palette
     ld a, %11100100
     ld [rBGP], a
     ld [rOBP0], a
 
 
-
+    ; Loading stuff into Twingo properties.
+    ; TODO: fix this up by doing a LOAD
+    ld a, $01
+    ld [wTwingo_active], a
+    ld a, $50
+    ld [wTwingo_yPos], a
+    ld a, $50
+    ld [wTwingo_xPos], a
+    ld a, $00
+    ld [wTwingo_spriteData], a
+    ld a, $01
+    ld [wTwingo_spriteData + 1], a
 
     ld a, %10000010
     ld [rLCDC], a
+
+    ld hl, BulletArray
+    ld b, HIGH(BulletArrayEnd - BulletArray)
+    ld c, LOW(BulletArrayEnd - BulletArray)
+    xor a
+    call WipeMaps
 
 .gameLoop
     call JoypadHandler
     ld b, a
 
+; TODO: instead of just turning off inputs, what's a better way we could do this? 
 .checkCollision
-    ld a, [gerald_sprite + $01]
+    ld a, [wTwingo_xPos]
 
 .cCLeft
     cp $07
     jr nz, .cCRight
     res 5, b
 .cCRight
-    ld a, [geraldina_sprite + $01]
     cp $A1
     jr nz, .cCUp
     res 4, b
 .cCUp
-    ld a, [gerald_sprite]
-    cp $0F
+    ld a, [wTwingo_yPos]
+    cp $0B
     jr nz, .cCDown
     res 6, b
 .cCDown
@@ -111,102 +114,196 @@ Start:
     ; Check for up/down input.
     ld c, a
     ld d, 0 ; So, zero is currently in d.
-    ; So right now, b has the joypad buttons, and c has gerald's spritepos y.
+    ; So right now, b has the joypad buttons, and c has twingo's spritepos y.
 .checkDown
     bit 7, b ; Is the down key being pressed? If not...
     jr z, .checkUp ; Go check the up key
-    ld d, 1 ; But if it is, here's 1!! positive = moving down the screen.
+    inc d ; But if it is, here's 1!! positive = moving down the screen.
 .checkUp
-    bit 6, b ; Is the up key being pressed?
-    jr z, .udAdd ; If it's not, just go to addition.
-    ld d, -1 ; But if it is, here's -1! negative = moving up the screen.
+    bit 6, b 
+    jr z, .udAdd
+    dec d
 .udAdd
-    ld a, d ; load whatever the up/down value is into a
+    ld a, d
     add a, c
-    ld [gerald_sprite], a
+    ld [wTwingo_yPos], a
+    ld d, 0
 
-
-    ; Now for left/right.
-ld a, [gerald_sprite + 1]
+    ld a, [wTwingo_xPos]
     ld c, a
-    ld d, 0 ; So, zero is currently in d.
-    ; So right now, b has the joypad buttons, and c has gerald's spritepos x.
-.checkLeft
-    bit 5, b ; Is the left key being pressed? If not...
-    jr z, .checkRight ; Go check the left key
-    ld d, -1 ; But if it is, here's -1! negative = moving left of the screen.
 .checkRight
-    bit 4, b ; Is the right key being pressed?
+    bit 4, b ; Is the down key being pressed? If not...
+    jr z, .checkLeft ; Go check the up key
+    inc d ; But if it is, here's 1!! positive = moving to the right of the screen.
+.checkLeft
+    bit 5, b ; Is the up key being pressed?
     jr z, .lrAdd ; If it's not, just go to addition.
-    ld d, 1 ; But if it is, here's 1!! positive = moving to the right of the screen. 
+    dec d ; But if it is, here's -1! negative = moving to the left of the screen.
 .lrAdd
     ld a, d ; load whatever the up/down value is into a
     add a, c
-    ld [gerald_sprite + 1], a
+    ld [wTwingo_xPos], a
 
-    ld a, [gerald_sprite]
-    ld [geraldina_sprite], a
 
-    ld a, [gerald_sprite + 1]
-    add a, $08
-    ld [geraldina_sprite + 1], a
-
-    ; So, we want Geraldina to shoot a missle.
-    ; First, we check for input - is A being pressed?
-    ; If it is, now we have to figure out how to handle objects.
-    ; For the sake of simplicity, let's assume that the first two slots (8 bytes) are off limits.
-    ; I want to reserve the next infinite amount of objects just for the fireballs for now.
-    ; We need to sort a lot of this out.
-
-    ; How does a fireball travel after it is created?
-    ; We need to control a few things:
-    ; Its speed, how rapidly we shoot them,
-    ; and what happens when they leave the screen boundary.
-
-    ; SHOOTING
-    ; We'll use cur_keys and prev_keys to figure out whether or not the button was JUST pressed, or being held.
-    ; If A was just pressed (the cur_keys bit is 1 and the prev_keys bit is 0), then shoot the fireball.
-    ; Otherwise, if those two bits are the SAME, do a bit check on bit 5, 6, 7, whatever, so it's shot on a timer.
-
-    ld a, [prev_keys]
-    ld b, a
+.bulletShoot
+    ld a, [new_keys] ; Check pressed buttons
+    and PADF_A
+    ld c, a ; Pressed buttons, in this case a
+    jr z, .noDASReset ; If A is not newly pressed...
+    ld a, DAS_INITIAL_TIMER ; If it's a new key, then load the initial timer into wDASTimer
+    ld [wDASTimer], a
+.noDASReset
     ld a, [cur_keys]
-    and b
+    and PADF_A ; Check if a is being currently held
+    jr z, .noDAS ; If it's not, then get out of here
+    ld hl, wDASTimer ; If it is, though, decrement the timer...
+    dec [hl]
+    jr nz, .noDAS ; If the timer isn't zero yet, skip... But if it is...
+    ld [hl], DAS_INTERVAL 
+    set PADB_A, c ; Pretend that the A button is pressed
+.noDAS
 
-    bit a, 0
+    bit PADB_A, c
+    jr z, .bulletUpdate
 
-    jr z, .shoot
+.bulletInit
+    ld hl, BulletArray
+    ld d, LOW(BulletArrayEnd - BulletArray) / sizeof_Bullet
+.bulletInitLoop
+    bit 0, [hl]
+    jr z, .bulletInitSlotReady
+
+.bulletInitSlotFull
+    ld bc, $0004
+    add hl, bc 
+    jr .bulletInitLoopEnd
+
+.bulletInitSlotReady
+    set 0, [hl]
+    inc hl
+    ld a, [wTwingo_yPos]
+    ld [hli], a
+    ld a, [wTwingo_xPos]
+    ld [hli], a
+    ld a, $02
+    ld [hli], a
+    jr .bulletUpdate
+
+.bulletInitLoopEnd
+    dec d
+    jr nz, .bulletInitLoop
+
+.bulletUpdate
+    ld hl, BulletArray
+    ld d, LOW(BulletArrayEnd - BulletArray) / sizeof_Bullet
+    ld bc, -2
+.bulletUpdateLoop
+    ; Check to see if it's past screen boundary
+    inc hl
+    inc hl
+    ld a, [hl]
+    cp $A9
+    dec hl
+    dec hl
+    jr nz, .bulletUpdateLoopCheckBit
+    res 0, [hl] 
+
+.bulletUpdateLoopCheckBit
+    bit 0, [hl]
+    jr nz, .bulletUpdatePosition
+
+.bulletUpdateReset
+    xor a
+    ld [hli], a
+    ld [hli], a   
+    ld [hli], a
+    ld [hli], a
+    jr .bulletUpdateLoopEnd
+    
+.bulletUpdatePosition
+    inc hl
+    inc hl
+    ld a, [hl]
+    inc a
+    ld [hli], a
+    inc hl
+
+.bulletUpdateLoopEnd
+    dec d
+    jr nz, .bulletUpdateLoop
+
+.objLoadTime
+    ld hl, hOAMIndex ; What are we doing here? loading the address of our oam index into hl.
+    ld l, [hl] ; Now, into l, we load the lower bit, which is the next open space (ideally) for us to put something into.
+
+.objTwingo
+    ld a, [wTwingo_active]
+
+    cp 0
+    jr z, .objTwingoEnd
+
+    ld a, [wTwingo_yPos]
+   ; sub a, 4
+    ld [hli], a
 
 
-.shoot
-    call FindEmptyOAM
+    ld a, [wTwingo_xPos]
+    ;add a, -4
+    ld [hli], a
 
+    ld a, [wTwingo_spriteData]
+    ld [hli], a
+    inc hl
 
-    ; MOVING
+    ;Right part of sprite
+    ld a, [wTwingo_yPos]
+    ;sub a, 4
+    ld [hli], a 
 
-    ; The simple way to do it would be to comb through OAM... but that's slow
-    ; We could store some values sequentially in HRAM...
-    ; This is sloppy, but I'll do it.
-    ; We'll store 6 bytes in WRAM. 2 for each fireball.
-    ; One will be the position from C0 in which the fireball is stored.
-    ; The other will be its X position.
-    ; When we WANT to create a fireball...
-    ; Check to see if any of those 3 empty slots in WRAM are zero (reset). So, byte 0, byte 2, byte 4.
-    ; If one of them is, then create the fireball.
-    ; And store its address and x position into those two registers.
-    ; If a fireball finds that it's past FF or whatever, it will wipe itself.
+    ld a, [wTwingo_xPos]
+    add a, 8
+    ld [hli], a 
 
+    ld a, [wTwingo_spriteData + 1]
+    ld [hli], a
+    inc hl
+.objTwingoEnd
 
+.objBullet
+    ld bc, BulletArray
+    ld d, Low(BulletArrayEnd - BulletArray) / sizeof_Bullet
+.objBulletLoop
+    ; y pos
+    inc bc
+    ld a, [bc]
+    ld [hli], a
+    
+    ;x pos
+    inc bc
+    ld a, [bc]
+    ld [hli], a
+    
+    ;sprite data
+    inc bc
+    ld a, [bc]
+    ld [hli], a
 
+    ;other
+    inc bc
+    inc hl
+
+    dec d
+    jr nz, .objBulletLoop
 
 .gameLoopEnd
     call WaitVBlank
 
-    ld a, HIGH(gerald_sprite)
+    ld a, HIGH(OAMVars)
     call hOAMDMA
 
-
-    jr .gameLoop
+    ld a, $00
+    ld [hOAMIndex], a
+    jp .gameLoop
 
 WaitVBlank:
     ld a, [rSTAT]
@@ -215,127 +312,49 @@ WaitVBlank:
     ret z
     jr WaitVBlank
 
-
 VBlankHandler:
-
-reti
-
-;Comb through our shadow OAM until you find an empty spot
-FindEmptyOAM:
-    ld hl, $C100
-    ld c, OAMVarsEnd - OAMVars
-
-.findEmptyOAMLoop 
-
-    ; See if what's at a is zero. If it is, time to start combing.
-    ld a, [hl]
-    ld b, a
-    
-    ; increment hl for the next loop and decrement c. THEN check on c.
-    add hl, 4
-    ld a, c
-    sub a, 4
-    ld c, a
-    cp 0
-    ret z
-
-
-    inc b
-    dec b
-
-    ; So, is b (actually a) zero? If it is, move onto the next proper loop. 
-    ; If not, carry on. 
-    jr nz, .findEmptyOAMLoop
-    ; Once you find a zero, set a timer and increment slowly through, checking that everything else is zero
-    ; If something isn't zero, you can just add what's left in the timer to hl
-    ld b, 4
-.findEmptyOAMLoopComb
-    ; See if the other three registers are zero. If each is, decrement b and increase hl.
-    ; If b AND a is zero, load the address of hl into "a" finally and return. Uhhh, minus 4 first.
-    ; Conditions: b is not zero and [hl] is zero.
-    ; b is zero and [hl] is zero.
-    ; b is zero and [hl] is not zero.
-    inc hl
-    dec b
-    ld a, [hl]
-    cp 0
-    ; If [hl] is zero, continue
-    jr z, findEmptyOAMLoopComb
-
-    ; If you're here, then [hl] is not zero.
-    and b
-
-    jr z, findEmptyOAMLoopSuccessCondition ; So if b AND whatever is at "a" is zero, we're good to go!
-
-
-    ; If for some reason it is not, then load the rest of the counter bits from b to hl, subtract b from c, and resume the sequence
-    ; we want to do "add b, hl"
-
-    ld a, b
-    cpl
-    inc a
-
-    ld d, $FF
-    ld e, a
-
-    add hl, de
-
-    ld a, c
-    sub a, b
-    ld c, a
-
-    jr .findEmptyOAMLoop
-
-.findEmptyOAMLoopSuccessCondition
-    add hl, -4
-    ld a, hl
-    ret
+    reti
 
 FCopyToVRAM:
-ld a, [de] ; Load one byte from the source
-ld [hli], a ; load into address at hl, and increment hl
-inc de ; Go to the next byte
-dec bc ; Decrement the amount of bytes we gotta move
-ld a, b ; Check if the counter is at zero.. since dec bc doesn't set flags
-or c ; make sure c doesn't have anything either
-jr nz, FCopyToVRAM
-ret
+    ld a, [de] ; Load one byte from the source
+    ld [hli], a ; load into address at hl, and increment hl
+    inc de ; Go to the next byte
+    dec bc ; Decrement the amount of bytes we gotta move
+    ld a, b ; Check if the counter is at zero.. since dec bc doesn't set flags
+    or c ; make sure c doesn't have anything either
+    jr nz, FCopyToVRAM
+    ret
 
 WipeOAM:
-    ld hl, $C100
-    ld de, OAMVars
+    ld h, HIGH(OAMVars)
+    ld l, $00
     ld bc, OAMVarsEnd - OAMVars
     .wipeOAMLoop
     ld a, 0 
     ld [hli], a ; increment hl
-    inc de ; Go to the next byte
     dec bc ; Decrement the amount of bytes we gotta move
     ld a, b ; Check if the counter is at zero.. since dec bc doesn't set flags
     or c ; make sure c doesn't have anything either
     jr nz, .wipeOAMLoop
     ret
 
-
-
 WipeMaps:
 ; DON'T BE MESSIN W THIS IF IT'S NOT IN VBLANK!!
-; hl = start address. b = high bit of end address.
+; hl = start address. bc = size of address to wipe/set. a = value to set it to.
+    ld d, a
 .wipeMapsJump
-    ld a, $00
-    ld [hli], a
-    ld a, h
-    xor b ; xor it with the high bit of the destination address
-
+    ld [hl], d
+    inc hl
+    dec bc
+    ld a, b
+    or c
     jr nz, .wipeMapsJump
     ret
-
-
 
 SECTION "Graphics", ROM0
 GF:
 INCBIN "include/gerald.2bpp"
 GFEnd:
-
 
 SECTION "OAM DMA routine", ROM0
 CopyDMARoutine:
@@ -359,20 +378,23 @@ DMARoutine:
     ret
 DMARoutineEnd:
 
-
-SECTION "Shadow OAM Vars", ALIGN[8]
-OAMVars:
-gerald_sprite: DS 4
-geraldina_sprite: DS 4
-DS 152
-OAMVarsEnd:
-
-SECTION "Fireball info", WRAM0
-fireballs: ds 6
-
+SECTION "Shadow OAM Vars", WRAM0, ALIGN[8]
+    hOAMIndex: ds 1
+    OAMVars:
+    DS 160
+    OAMVarsEnd:
+    
 SECTION "OAM DMA", HRAM
-
 hOAMDMA::
     ds DMARoutineEnd - DMARoutine ;reserve space to copy the routine to -- hey CHUCKLENUTS. THIS IS WHERE THE DMA TRANSFER FUNCTION IS GONNA BE, 'KAY?
 
+SECTION "Objects", WRAM0, ALIGN[8]
+    dstruct MainActor, wTwingo
+    BulletArray:
+    dstructs 3, Bullet, wBullet
+    BulletArrayEnd:
+
+SECTION "Other Vars", WRAM0, ALIGN[8]
+    wBulletTimer: ds 1
+    wDASTimer: ds 1
 
