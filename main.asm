@@ -365,3 +365,5 @@ ANGLE = ANGLE + 256.0 ; 256.0 = 65536 degrees / 256 entries
 Section "Enemy Path Y", ROM0, ALIGN[8]
 ;12.4 fixed point: 0000 0000 0000 . 0000
 ; So, max is 4096, and the most precise you can get is 1/2 + 1/4 + 1/8 + 1/16, or 15/16
+
+;Test
