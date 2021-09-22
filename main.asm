@@ -2,8 +2,9 @@ INCLUDE "include/hardware.inc"
 INCLUDE "include/mystructs.inc"
 INCLUDE "include/metasprites.inc"
 
-DEF DAS_INITIAL_TIMER EQU 20
-DEF DAS_INTERVAL EQU 20
+DEF DAS_INITIAL_TIMER EQU $14
+DEF DAS_INTERVAL EQU $14
+DEF TWINGO_MOVE_SPEED EQU $02
 
 SECTION "Header", ROM0[$100]
 
@@ -93,6 +94,16 @@ Start:
     call JoypadHandler
     ld b, a
 
+    ; Don't worry about the most significant position nibble for now
+    ld a, [wTwingo_xPos +1]
+    and $0F
+    ld [wTwingo_xPos +1], a
+
+    ld a, [wTwingo_yPos +1]
+    and $0F
+    ld [wTwingo_yPos +1], a
+
+
 ; TODO: instead of just turning off inputs, what's a better way we could do this? 
 .checkCollision
 
@@ -108,210 +119,200 @@ Start:
     ; TODO: Change this to a more consistent little-Endian
 
 .cCLeft
-    ld a, [wTwingo_xPos + 1]
-    ld d, a
+    ld b, b
     ld a, [wTwingo_xPos]
-    ld e, a
-
-    ; cp $07:
-    ld a, e
-    sub $70 ;So what is this, 7? 7 in 12.4 fixed point is .... 0000 0000 0111 0000 so in hex that's $70
-    ld a, d
+    ; cp $07
+    sub $70 
+    ld a, [wTwingo_xPos + 1]
     sbc $00
-    or e
-    jr nz, .cCRight
+    jr nc, .cCRight
     res 5, b
 .cCRight
-    ld a, [wTwingo_xPos + 1]
-    ld d, a
     ld a, [wTwingo_xPos]
-    ld e, a
-    ; cp $1A
-    ld a, e
+    ; cp $A1
     sub $10 ;
-    ld a, d
+    ld a, [wTwingo_xPos + 1]
     sbc $0A
-    or e
-    jr nz, .cCUp
+    jr c, .cCUp
     res 4, b
 .cCUp
-    ld a, [wTwingo_yPos + 1]
-    ld d, a
-    ld a, [wTwingo_yPos]
-    ld e, a
     ; cp $0B
-    ld a, e
+    ld a, [wTwingo_yPos]
     sub $B0 ;
-    ld a, d
+    ld a, [wTwingo_yPos + 1]
     sbc $00
-    or e
-    jr nz, .cCDown
+    jr nc, .cCDown
     res 6, b
 .cCDown
-    ld a, [wTwingo_yPos + 1]
-    ld d, a
-    ld a, [wTwingo_yPos]
-    ld e, a
     ; cp $99
-    ld a, e
+    ld a, [wTwingo_yPos]
     sub $90 ;
-    ld a, d
+    ld a, [wTwingo_yPos + 1]
     sbc $09
-    or e
-    jr nz, .joypadObject
+    jr c, .joypadObject
     res 7, b
+
 
 .joypadObject
     ; Do all input based calculations.
     ; Check for up/down input.
     ld a, [wTwingo_yPos]
-    ld c, a
-    ld d, 0 ; So, zero is currently in d.
-    ; So right now, b has the joypad buttons, and c has twingo's spritepos y.
+    ld l, a
+    ld a, [wTwingo_yPos + 1]
+    ld h, a
+    ; So right now, b has the joypad buttons, and hl has twingo's full spritepos y.
 .checkDown
     bit 7, b ; Is the down key being pressed? If not...
     jr z, .checkUp ; Go check the up key
-    inc d ; But if it is, here's 1!! positive = moving down the screen.
+    ld d, $00
+    ld e, 16
+    add hl, de ; But if it is, here's 1!! positive = moving down the screen.
 .checkUp
     bit 6, b 
     jr z, .udAdd
-    dec d
-.udAdd
-    ld a, d
-    add a, c
-        ld [wTwingo_yPos], a
-        ld a, [wTwingo_yPos + 1] ; The big part, cause we're little endian
-        adc a, 0
-        ld [wTwingo_yPos + 1], a
-        ld d, 0
+    ld d, $FF
+    ld e, -16
+    add hl, de
 
-        ld a, [wTwingo_xPos]
-        ld c, a
+.udAdd
+    ld a, l
+    ld [wTwingo_yPos], a
+    ld a, h
+    ld [wTwingo_yPos + 1], a
+
+    ld a, [wTwingo_xPos]
+    ld l, a
+    ld a, [wTwingo_xPos + 1]
+    ld h, a
 .checkRight
     bit 4, b ; Is the right key being pressed? If not...
     jr z, .checkLeft ; Go check the right key
-    inc d ; But if it is, here's 1!! positive = moving to the right of the screen.
+    ld d, $00
+    ld e, 16
+    add hl, de ; But if it is, here's 1!! positive = moving down the screen.
 .checkLeft
     bit 5, b ; Is the left key being pressed?
     jr z, .lrAdd ; If it's not, just go to addition.
-    dec d ; But if it is, here's -1! negative = moving to the left of the screen.
+    ld d, $FF
+    ld e, -16
+    add hl, de
 .lrAdd
-        ld a, d ; take whatever d has become...
-        add a, c ; add it to the xPos lower byte
-        ld [wTwingo_xPos], a ; put that back in
-        ld a, [wTwingo_xPos + 1]
-        adc a, 0 ; add the carry bit if there is one
-        ld [wTwingo_xPos + 1], a
+    ld a, l
+    ld [wTwingo_xPos], a
+    ld a, h
+    ld [wTwingo_xPos + 1], a
 
-.bulletShoot
-    ld a, [new_keys] ; Check pressed buttons
-    and PADF_A
-    ld c, a ; Pressed buttons, in this case a
-    jr z, .noDASReset ; If A is not newly pressed...
-    ld a, DAS_INITIAL_TIMER ; If it's a new key, then load the initial timer into wDASTimer
-    ld [wDASTimer], a
-.noDASReset
-    ld a, [cur_keys]
-    and PADF_A ; Check if a is being currently held
-    jr z, .noDAS ; If it's not, then get out of here
-    ld hl, wDASTimer ; If it is, though, decrement the timer...
-    dec [hl]
-    jr nz, .noDAS ; If the timer isn't zero yet, skip... But if it is...
-    ld [hl], DAS_INTERVAL 
-    set PADB_A, c ; Pretend that the A button is pressed
-.noDAS
 
-    bit PADB_A, c
-    jr z, .bulletUpdate
+; As tony soprano would say, "FUck dis, im waiting til I fix the positioning before dealing wit dis shit."
+; .bulletShoot
+;     ld a, [new_keys] ; Check pressed buttons
+;     and PADF_A
+;     ld c, a ; Pressed buttons, in this case a
+;     jr z, .noDASReset ; If A is not newly pressed...
+;     ld a, DAS_INITIAL_TIMER ; If it's a new key, then load the initial timer into wDASTimer
+;     ld [wDASTimer], a
+; .noDASReset
+;     ld a, [cur_keys]
+;     and PADF_A ; Check if a is being currently held
+;     jr z, .noDAS ; If it's not, then get out of here
+;     ld hl, wDASTimer ; If it is, though, decrement the timer...
+;     dec [hl]
+;     jr nz, .noDAS ; If the timer isn't zero yet, skip... But if it is...
+;     ld [hl], DAS_INTERVAL 
+;     set PADB_A, c ; Pretend that the A button is pressed
+; .noDAS
 
-.bulletInit
-    ld hl, BulletArray
-    ld d, LOW(BulletArrayEnd - BulletArray) / sizeof_Bullet
-.bulletInitLoop
-    bit 0, [hl]
-    jr z, .bulletInitSlotReady
+;     bit PADB_A, c
+;     jr z, .bulletUpdate
 
-.bulletInitSlotFull
-    ld bc, $0004
-    add hl, bc 
-    jr .bulletInitLoopEnd
+; .bulletInit
+;     ld hl, BulletArray
+;     ld d, LOW(BulletArrayEnd - BulletArray) / sizeof_Bullet
+; .bulletInitLoop
+;     bit 0, [hl]
+;     jr z, .bulletInitSlotReady
 
-.bulletInitSlotReady
-    set 0, [hl]
-    inc hl
-    ld a, [wTwingo_yPos]
-    ld [hli], a
-    ld a, [wTwingo_yPos + 1]
-    ld [hli], a
+; .bulletInitSlotFull
+;     ld bc, $0004
+;     add hl, bc 
+;     jr .bulletInitLoopEnd
 
-    ld [hli], a
-    ld a, [wTwingo_xPos]
-    ld [hli], a
-    ld a, [wTwingo_xPos + 1]
-    ld a, $02
-    ld [hli], a
-    jr .bulletUpdate
+; .bulletInitSlotReady
+;     set 0, [hl]
+;     inc hl
+;     ld a, [wTwingo_yPos]
+;     ld [hli], a
+;     ld a, [wTwingo_yPos + 1]
+;     ld [hli], a
 
-.bulletInitLoopEnd
-    dec d
-    jr nz, .bulletInitLoop
+;     ld [hli], a
+;     ld a, [wTwingo_xPos]
+;     ld [hli], a
+;     ld a, [wTwingo_xPos + 1]
+;     ld a, $02
+;     ld [hli], a
+;     jr .bulletUpdate
 
-.bulletUpdate
-    ld hl, BulletArray
-    ld d, LOW(BulletArrayEnd - BulletArray) / sizeof_Bullet
-    ld bc, -2 
-.bulletUpdateLoop
-    ; Check to see if it's past screen boundary
-    inc hl
-    inc hl
-    inc hl
-            ;cp $A9. Indenting this until i truly understand it.
-            ld a, [hli]
-            sub $90 
-            ld e, a
-            ld a, [hl]
-            sbc $0A
-            or e
+; .bulletInitLoopEnd
+;     dec d
+;     jr nz, .bulletInitLoop
 
-	jp nz, .bulletUpdateReset
+; .bulletUpdate
+;     ld hl, BulletArray
+;     ld d, LOW(BulletArrayEnd - BulletArray) / sizeof_Bullet
+;     ld bc, -2 
+; .bulletUpdateLoop
+;     ; Check to see if it's past screen boundary
+;     inc hl
+;     inc hl
+;     inc hl
+;             ;cp $A9. Indenting this until i truly understand it.
+;             ld a, [hli]
+;             sub $90 
+;             ld e, a
+;             ld a, [hl]
+;             sbc $0A
+;             or e
 
-    dec hl
-    dec hl
-    dec hl
-    dec hl
-    jr nz, .bulletUpdateLoopCheckBit
-    res 0, [hl] 
+; 	jp nz, .bulletUpdateReset
 
-.bulletUpdateLoopCheckBit
-    bit 0, [hl]
-    jr nz, .bulletUpdatePosition
+;     dec hl
+;     dec hl
+;     dec hl
+;     dec hl
+;     jr nz, .bulletUpdateLoopCheckBit
+;     res 0, [hl] 
 
-.bulletUpdateReset
-    xor a
-    ld [hli], a
-    ld [hli], a   
-    ld [hli], a
-    ld [hli], a
-    ld [hli], a
-    ld [hli], a   
+; .bulletUpdateLoopCheckBit
+;     bit 0, [hl]
+;     jr nz, .bulletUpdatePosition
 
-    jr .bulletUpdateLoopEnd
+; .bulletUpdateReset
+;     xor a
+;     ld [hli], a
+;     ld [hli], a   
+;     ld [hli], a
+;     ld [hli], a
+;     ld [hli], a
+;     ld [hli], a   
+
+;     jr .bulletUpdateLoopEnd
     
-.bulletUpdatePosition
-    inc hl
-    inc hl
-    inc hl 
-    ld a, [hl]
-    add a, $02
-    ld [hli], a
-    ld a, [hl]
-    adc a, 0
-    ld [hli], a
-    inc hl
+; .bulletUpdatePosition
+;     inc hl
+;     inc hl
+;     inc hl 
+;     ld a, [hl]
+;     add a, $02
+;     ld [hli], a
+;     ld a, [hl]
+;     adc a, 0
+;     ld [hli], a
+;     inc hl
 
-.bulletUpdateLoopEnd
-    dec d
-    jr nz, .bulletUpdateLoop
+; .bulletUpdateLoopEnd
+;     dec d
+;     jr nz, .bulletUpdateLoop
 
 .objLoadTime
     ld hl, hOAMIndex ; What are we doing here? loading the address of our oam index into hl.
@@ -325,28 +326,34 @@ Start:
 
     ld bc, wTwingo_yPos
 
+    ; You have the twingo yPos small byte, which is, let's say, $50
+    ld a, [bc] ; We start with the twingo ypos little bit. Let's say it's $50.
+	ld e, a ; Okay, put that into e.
+    inc bc ; Go to the big bit. Let's say it's $00.
+	ld a, [bc] ; Put that in a.
+	xor e ; You take a, which is $00, and xor it by e, which is $50. So, let's do that bit by bit. $50 = %01010000. So XORing that with zero gets you... $50. Easy example.
+    ; $50 xor $00 is $50, right?
+    ; 01010000
+    ; 00000000
+    ;=01010000 ;  YUP!
+	and $0F ;Now AND that, so keep only the bottom bits.
+	xor e ; Now you XOR that by e again, though. Remember what was in e? $50. $00 xor $50 is $50
+    swap a ; But you actually want $05. So swap it.
+    ld [hli], a ; Put that into hl.
+ 
+    inc bc ; Here we are with the same algorithm. No real explanation for the crazy spaziness.
+
     ld a, [bc]
 	ld e, a
     inc bc
 	ld a, [bc]
 	xor e
-	and $F0
+	and $0F
 	xor e
     swap a
     ld [hli], a
 
-    inc bc
-
-    ld a, [bc]
-	ld e, a
-    inc bc
-	ld a, [bc]
-	xor e
-	and $F0
-	xor e
-    swap a
-    ld [hli], a
-
+    ; Keeping it to one sprite until I can get the fucking positioning working
     ld a, $02
     ld [hli], a
 
@@ -360,51 +367,51 @@ Start:
 
 .objTwingoEnd
 
-.objBullet
-    ld bc, BulletArray
-    ld d, LOW(BulletArrayEnd - BulletArray) / sizeof_Bullet
-.objBulletLoop
-    ; y pos
-    inc bc
-    ; Bit shift by 4 here.
+; .objBullet
+;     ld bc, BulletArray
+;     ld d, LOW(BulletArrayEnd - BulletArray) / sizeof_Bullet
+; .objBulletLoop
+;     ; y pos
+;     inc bc
+;     ; Bit shift by 4 here.
 
-    ld a, [bc]
-	ld e, a
-    inc bc
-	ld a, [bc]
-	xor e
-	and $F0
-	xor e
-    swap a
+;     ld a, [bc]
+; 	ld e, a
+;     inc bc
+; 	ld a, [bc]
+; 	xor e
+; 	and $F0
+; 	xor e
+;     swap a
 
-    ld [hli], a
+;     ld [hli], a
     
-    ;x pos
-    inc bc
-    ; Bit shift by 4 here.
+;     ;x pos
+;     inc bc
+;     ; Bit shift by 4 here.
 
-    ld a, [bc]
-	ld e, a
-    inc bc
-	ld a, [bc]
-	xor e
-	and $F0
-	xor e
-    swap a
+;     ld a, [bc]
+; 	ld e, a
+;     inc bc
+; 	ld a, [bc]
+; 	xor e
+; 	and $F0
+; 	xor e
+;     swap a
 
-    ld [hli], a
+;     ld [hli], a
     
-    ;sprite data
-    inc bc
-    ld a, [bc]
-    ld [hli], a
+;     ;sprite data
+;     inc bc
+;     ld a, [bc]
+;     ld [hli], a
 
-    ;other
-    inc bc
-    inc hl
+;     ;other
+;     inc bc
+;     inc hl
 
-    dec d
-    jr nz, .objBulletLoop
+;     dec d
+;     jr nz, .objBulletLoop
 
 .gameLoopEnd
     call WaitVBlank
